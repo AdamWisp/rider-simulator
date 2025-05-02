@@ -42,21 +42,29 @@ class RiderTrackSimulation:
     
     def track_queue(self):
         """Record queue length over time"""
-        while True:
+        max_time = 1000  # Same as simulation timeout
+        current_time = 0
+        
+        while current_time < max_time:
             self.queue_stats.append({
                 'time': self.env.now,
                 'queue_length': self.riders_in_queue
             })
             yield self.env.timeout(0.5)  # Sample every half minute
+            current_time += 0.5
     
     def track_zone_utilization(self, zone, resource):
         """Track zone utilization stats"""
-        while True:
+        max_time = 1000  # Same as simulation timeout
+        current_time = 0
+        
+        while current_time < max_time:
             self.zone_stats[zone].append({
                 'time': self.env.now,
                 'utilization': resource.count / resource.capacity
             })
             yield self.env.timeout(0.5)  # Sample every half minute
+            current_time += 0.5
         
     def rider_process(self, rider_id, rider_type):
         """Process for a single rider going through the track"""
@@ -111,6 +119,10 @@ class RiderTrackSimulation:
         
     def inject_exp_riders(self):
         """Inject experienced riders after instructor exits"""
+        # Initialize inst_exit_time in case it's not set yet
+        if not hasattr(self, 'inst_exit_time'):
+            self.inst_exit_time = 0
+            
         yield self.env.timeout(self.inst_exit_time)  # Wait for instructor to exit entry gate
         
         # Schedule all EXP riders
@@ -119,6 +131,15 @@ class RiderTrackSimulation:
     
     def inject_foc_riders(self):
         """Inject focus riders after all EXP riders exit"""
+        # Initialize last_exp_exit_time in case it's not set yet
+        if not hasattr(self, 'last_exp_exit_time'):
+            # If nEXP is 0, we'll never set last_exp_exit_time
+            if self.params['nEXP'] == 0:
+                # Use instructor exit time instead
+                self.last_exp_exit_time = getattr(self, 'inst_exit_time', 0)
+            else:
+                self.last_exp_exit_time = 0
+                
         yield self.env.timeout(self.last_exp_exit_time)  # Wait for last EXP rider to exit entry gate
         
         # Schedule all FOC riders
@@ -139,12 +160,20 @@ class RiderTrackSimulation:
         self.env.process(self.inject_exp_riders())
         self.env.process(self.inject_foc_riders())
         
-        # Run the simulation
-        self.env.run()
+        # Run the simulation with a timeout to prevent infinite execution
+        # This ensures the simulation will end even if there's a logical issue
+        max_simulation_time = 1000  # Set a reasonable upper bound in minutes
+        try:
+            self.env.run(until=max_simulation_time)
+        except Exception as e:
+            print(f"Simulation stopped with error: {e}")
+            # Continue to return results anyway
         
         # Calculate total simulation time based on the last exit event
         if self.rider_events:
             self.total_sim_time = max(event['time'] for event in self.rider_events)
+        else:
+            self.total_sim_time = 0
         
         return {
             'events': self.rider_events,
@@ -276,6 +305,11 @@ def create_animation_frame(events, current_time, params):
     # Find all riders who have entered but not exited each zone at current_time
     zones = ['Queue', 'EnterGate', 'ZoneA', 'ZoneB', 'ZoneC', 'ExitGate']
     
+    # Check if events is empty
+    if not events:
+        st.write("No simulation data available for animation.")
+        return
+    
     # Create a DataFrame from events
     df = pd.DataFrame(events)
     
@@ -290,10 +324,18 @@ def create_animation_frame(events, current_time, params):
         current_zone = None
         
         for zone in zones:
+            # Skip if no data for this zone
+            if zone not in rider_data['zone'].values:
+                continue
+                
             zone_data = rider_data[rider_data['zone'] == zone]
             enters = zone_data[zone_data['action'] == 'enter']
             exits = zone_data[zone_data['action'] == 'exit']
             
+            # Skip if no enter events
+            if enters.empty:
+                continue
+                
             # Check if rider is in this zone at current_time
             for enter_idx, enter_row in enters.iterrows():
                 enter_time = enter_row['time']
@@ -319,71 +361,99 @@ def create_animation_frame(events, current_time, params):
     with col1:
         st.write("## Queue")
         for rider in zone_occupancy['Queue']:
-            rider_type = df[df['rider_id'] == rider]['rider_type'].iloc[0]
-            if rider_type == "INST":
-                st.markdown(f"<span style='color:red'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            elif rider_type == "EXP":
-                st.markdown(f"<span style='color:green'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            else:  # FOC
-                st.markdown(f"<span style='color:blue'>🏍️ {rider}</span>", unsafe_allow_html=True)
+            # Check if rider exists in DataFrame
+            if rider in df['rider_id'].values:
+                rider_data = df[df['rider_id'] == rider]
+                if not rider_data.empty and 'rider_type' in rider_data.columns:
+                    rider_type = rider_data['rider_type'].iloc[0]
+                    if rider_type == "INST":
+                        st.write(f"🔴 {rider}")
+                    elif rider_type == "EXP":
+                        st.write(f"🟢 {rider}")
+                    else:  # FOC
+                        st.write(f"🔵 {rider}")
     
     with col2:
         st.write("## Gate")
         for rider in zone_occupancy['EnterGate']:
-            rider_type = df[df['rider_id'] == rider]['rider_type'].iloc[0]
-            if rider_type == "INST":
-                st.markdown(f"<span style='color:red'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            elif rider_type == "EXP":
-                st.markdown(f"<span style='color:green'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            else:  # FOC
-                st.markdown(f"<span style='color:blue'>🏍️ {rider}</span>", unsafe_allow_html=True)
+            # Check if rider exists in DataFrame
+            if rider in df['rider_id'].values:
+                rider_data = df[df['rider_id'] == rider]
+                if not rider_data.empty and 'rider_type' in rider_data.columns:
+                    rider_type = rider_data['rider_type'].iloc[0]
+                    if rider_type == "INST":
+                        st.write(f"🔴 {rider}")
+                    elif rider_type == "EXP":
+                        st.write(f"🟢 {rider}")
+                    else:  # FOC
+                        st.write(f"🔵 {rider}")
     
     with col3:
         st.write("## Zone A")
         st.write(f"(Slow Riding: {params['tA']} min)")
         for rider in zone_occupancy['ZoneA']:
-            rider_type = df[df['rider_id'] == rider]['rider_type'].iloc[0]
-            if rider_type == "INST":
-                st.markdown(f"<span style='color:red'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            elif rider_type == "EXP":
-                st.markdown(f"<span style='color:green'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            else:  # FOC
-                st.markdown(f"<span style='color:blue'>🏍️ {rider}</span>", unsafe_allow_html=True)
+            # Check if rider exists in DataFrame
+            if rider in df['rider_id'].values:
+                rider_data = df[df['rider_id'] == rider]
+                if not rider_data.empty and 'rider_type' in rider_data.columns:
+                    rider_type = rider_data['rider_type'].iloc[0]
+                    if rider_type == "INST":
+                        st.write(f"🔴 {rider}")
+                    elif rider_type == "EXP":
+                        st.write(f"🟢 {rider}")
+                    else:  # FOC
+                        st.write(f"🔵 {rider}")
     
     with col4:
         st.write("## Zone B")
         st.write(f"(Decision Making: {params['tB']} min)")
         for rider in zone_occupancy['ZoneB']:
-            rider_type = df[df['rider_id'] == rider]['rider_type'].iloc[0]
-            if rider_type == "INST":
-                st.markdown(f"<span style='color:red'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            elif rider_type == "EXP":
-                st.markdown(f"<span style='color:green'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            else:  # FOC
-                st.markdown(f"<span style='color:blue'>🏍️ {rider}</span>", unsafe_allow_html=True)
+            # Check if rider exists in DataFrame
+            if rider in df['rider_id'].values:
+                rider_data = df[df['rider_id'] == rider]
+                if not rider_data.empty and 'rider_type' in rider_data.columns:
+                    rider_type = rider_data['rider_type'].iloc[0]
+                    if rider_type == "INST":
+                        st.write(f"🔴 {rider}")
+                    elif rider_type == "EXP":
+                        st.write(f"🟢 {rider}")
+                    else:  # FOC
+                        st.write(f"🔵 {rider}")
     
     with col5:
         st.write("## Zone C")
         st.write(f"(Obstacle: {params['tC']} min)")
         for rider in zone_occupancy['ZoneC']:
-            rider_type = df[df['rider_id'] == rider]['rider_type'].iloc[0]
-            if rider_type == "INST":
-                st.markdown(f"<span style='color:red'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            elif rider_type == "EXP":
-                st.markdown(f"<span style='color:green'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            else:  # FOC
-                st.markdown(f"<span style='color:blue'>🏍️ {rider}</span>", unsafe_allow_html=True)
+            # Check if rider exists in DataFrame
+            if rider in df['rider_id'].values:
+                rider_data = df[df['rider_id'] == rider]
+                if not rider_data.empty and 'rider_type' in rider_data.columns:
+                    rider_type = rider_data['rider_type'].iloc[0]
+                    if rider_type == "INST":
+                        st.write(f"🔴 {rider}")
+                    elif rider_type == "EXP":
+                        st.write(f"🟢 {rider}")
+                    else:  # FOC
+                        st.write(f"🔵 {rider}")
     
     with col6:
         st.write("## Exit")
         for rider in zone_occupancy['ExitGate']:
-            rider_type = df[df['rider_id'] == rider]['rider_type'].iloc[0]
-            if rider_type == "INST":
-                st.markdown(f"<span style='color:red'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            elif rider_type == "EXP":
-                st.markdown(f"<span style='color:green'>🏍️ {rider}</span>", unsafe_allow_html=True)
-            else:  # FOC
-                st.markdown(f"<span style='color:blue'>🏍️ {rider}</span>", unsafe_allow_html=True)
+            # Check if rider exists in DataFrame
+            if rider in df['rider_id'].values:
+                rider_data = df[df['rider_id'] == rider]
+                if not rider_data.empty and 'rider_type' in rider_data.columns:
+                    rider_type = rider_data['rider_type'].iloc[0]
+                    if rider_type == "INST":
+                        st.write(f"🔴 {rider}")
+                    elif rider_type == "EXP":
+                        st.write(f"🟢 {rider}")
+                    else:  # FOC
+                        st.write(f"🔵 {rider}")
+                        
+    # Legend
+    st.write("---")
+    st.write("🔴 INST: Instructor | 🟢 EXP: Experienced Riders | 🔵 FOC: Focus Riders")
 
 def export_to_csv(results):
     """Export simulation results to CSV"""
@@ -427,11 +497,15 @@ def save_scenario(params):
     return params
 
 def main():
-    st.set_page_config(
-        page_title="Rider Training Track Simulation",
-        page_icon="🏍️",
-        layout="wide",
-    )
+    try:
+        st.set_page_config(
+            page_title="Rider Training Track Simulation",
+            page_icon="🏍️",
+            layout="wide",
+        )
+    except Exception:
+        # Page config may have already been set
+        pass
     
     st.title("🏍️ Rider Training Track Simulation")
     
@@ -474,8 +548,20 @@ def main():
     # Button to run simulation
     if st.sidebar.button("Run Simulation"):
         with st.spinner("Running simulation..."):
-            st.session_state.results = run_simulation(st.session_state.params)
-            st.session_state.animate = False
+            try:
+                st.session_state.results = run_simulation(st.session_state.params)
+                st.session_state.animate = False
+            except Exception as e:
+                st.error(f"Error during simulation: {str(e)}")
+                import traceback
+                st.text(traceback.format_exc())
+                # Initialize results with empty values to prevent further errors
+                st.session_state.results = {
+                    'events': [],
+                    'queue_stats': [],
+                    'zone_stats': {'A': [], 'B': [], 'C': []},
+                    'total_time': 0
+                }
     
     # Load/Save scenario
     st.sidebar.subheader("Save/Load Scenario")
@@ -613,8 +699,20 @@ def main():
         Queue → Enter Gate → Zone A → Zone B → Zone C → Exit Gate
         """)
         
-        # Sample visualization for demo purposes
-        st.image("https://via.placeholder.com/800x400.png?text=Sample+Track+Layout", use_column_width=True)
+        # Text-based visualization instead of image
+        st.markdown("""
+        ```
+        ┌──────────────────────── Track ────────────────────────┐
+        │  ⏱ Enter time                                         │
+        │  Zone A  (Slow Riding)   (dwell = tA)                 │
+        │  Zone B  (Decision Making) (dwell = tB)               │
+        │  Zone C  (Obstacle)        (dwell = tC)               │
+        │  ⏱ Exit time (tExit)                                  │
+        └───────────────────────────────────────────────────────┘
+        
+        Queue Line ▸ Entry Gate ▸ Zone A ▸ Zone B ▸ Zone C ▸ Exit Gate ▸ Queue Line
+        ```
+        """)
 
 if __name__ == "__main__":
     main()
