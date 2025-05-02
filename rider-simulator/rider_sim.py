@@ -2,208 +2,164 @@ import json
 import time
 from datetime import datetime
 
-import pandas as pd
-import plotly.express as px
-import plotly.figure_factory as ff
-import simpy
 import streamlit as st
 import streamlit.components.v1 as components
 
-# ─────────────────────────── Simulation core ──────────────────────────── #
-class RiderTrackSimulation:
-    def __init__(self, params: dict):
-        self.env = simpy.Environment()
-        self.p = params.copy()
-
-        # Zone resources
-        self.zone_a = simpy.Resource(self.env, capacity=self.p['capZone'])
-        self.zone_b = simpy.Resource(self.env, capacity=self.p['capZone'])
-        self.zone_c = simpy.Resource(self.env, capacity=self.p['capZone'])
-
-        # Stats
-        self.events = []
-        self.queue_stats = []
-        self.util_stats = {'A': [], 'B': [], 'C': []}
-
-        # Sync events
-        self.inst_done = self.env.event()
-        self.exp_done = self.env.event()
-        if self.p['nEXP'] == 0:
-            self.exp_done.succeed()
-
-        # Completion barrier
-        self.done_event = self.env.event()
-        self.total_riders = 1 + self.p['nEXP'] + self.p['nFOC']
-        self.finished = 0
-
-        # Kick off instructor
-        self.env.process(self.rider('INST-1', 'INST'))
-
-    def record(self, rider_id, rider_type, zone, action):
-        self.events.append({
-            'rider_id': rider_id,
-            'rider_type': rider_type,
-            'zone': zone,
-            'action': action,
-            'time': self.env.now
-        })
-
-    def monitor_queue(self):
-        while True:
-            entered = sum(e['zone'] == 'Queue' and e['action'] == 'enter' for e in self.events)
-            exited = sum(e['zone'] == 'Queue' and e['action'] == 'exit' for e in self.events)
-            self.queue_stats.append({'time': self.env.now, 'queue_length': entered - exited})
-            yield self.env.timeout(0.5)
-
-    def monitor_util(self, tag, res):
-        while True:
-            self.util_stats[tag].append({'time': self.env.now, 'utilization': res.count / res.capacity})
-            yield self.env.timeout(0.5)
-
-    def rider(self, rid, rtype):
-        # Queue
-        self.record(rid, rtype, 'Queue', 'enter')
-
-        # Gate into Zone A
-        with self.zone_a.request() as req:
-            yield req
-            self.record(rid, rtype, 'Queue', 'exit')
-            self.record(rid, rtype, 'Gate', 'enter')
-            yield self.env.timeout(self.p['tEnter'])
-            self.record(rid, rtype, 'Gate', 'exit')
-
-        # Zone A
-        self.record(rid, rtype, 'ZoneA', 'enter')
-        yield self.env.timeout(self.p['tA'])
-        self.record(rid, rtype, 'ZoneA', 'exit')
-
-        # Zone B
-        with self.zone_b.request() as req:
-            yield req
-            self.record(rid, rtype, 'ZoneB', 'enter')
-            yield self.env.timeout(self.p['tB'])
-            self.record(rid, rtype, 'ZoneB', 'exit')
-
-        # Zone C
-        with self.zone_c.request() as req:
-            yield req
-            self.record(rid, rtype, 'ZoneC', 'enter')
-            yield self.env.timeout(self.p['tC'])
-            self.record(rid, rtype, 'ZoneC', 'exit')
-
-        # Exit Gate
-        self.record(rid, rtype, 'Exit', 'enter')
-        yield self.env.timeout(self.p['tExit'])
-        self.record(rid, rtype, 'Exit', 'exit')
-
-        # Trigger inst_done after full exit
-        if rtype == 'INST' and not self.inst_done.triggered:
-            self.inst_done.succeed()
-
-        # Trigger exp_done after all EXP exit
-        if rtype == 'EXP':
-            done_exp = sum(1 for e in self.events if e['rider_type'] == 'EXP' and e['zone'] == 'Exit' and e['action'] == 'exit')
-            if done_exp == self.p['nEXP'] and not self.exp_done.triggered:
-                self.exp_done.succeed()
-
-        # Completion
-        self.finished += 1
-        if self.finished == self.total_riders and not self.done_event.triggered:
-            self.done_event.succeed()
-
-    def inject_exp(self):
-        yield self.inst_done
-        for i in range(1, self.p['nEXP'] + 1):
-            self.env.process(self.rider(f'EXP-{i}', 'EXP'))
-
-    def inject_foc(self):
-        yield self.exp_done
-        for i in range(1, self.p['nFOC'] + 1):
-            self.env.process(self.rider(f'FOC-{i}', 'FOC'))
-
-    def run(self):
-        self.env.process(self.monitor_queue())
-        self.env.process(self.monitor_util('A', self.zone_a))
-        self.env.process(self.monitor_util('B', self.zone_b))
-        self.env.process(self.monitor_util('C', self.zone_c))
-        self.env.process(self.inject_exp())
-        self.env.process(self.inject_foc())
-        self.env.run(until=self.done_event)
-        total_time = max(e['time'] for e in self.events) if self.events else 0
-        return {'events': self.events, 'queue': self.queue_stats, 'util': self.util_stats, 'total_time': total_time}
-
-# ─────────────────────────── Streamlit UI ──────────────────────────── #
+# ───────────────────────────── Streamlit UI ────────────────────────────── #
 def main():
-    st.set_page_config(page_title='Rider Simulator', layout='wide')
-    st.title('🏍️ Rider Training Track')
+    st.set_page_config(page_title="Rider Training Simulator", layout="wide")
+    st.title("🏍️ Rider Training Track Simulation")
 
-    defaults = {'nEXP':25,'nFOC':10,'capZone':1,'tEnter':0.5,'tA':5.0,'tB':5.0,'tC':5.0,'tExit':0.5}
-    if 'params' not in st.session_state:
-        st.session_state.params = defaults.copy()
-    p = st.session_state.params
+    # --- Sidebar Inputs ---
+    st.sidebar.header("Batch Sizes")
+    n_exp = st.sidebar.number_input("Number of EXP Riders", min_value=0, max_value=100, value=25)
+    n_foc = st.sidebar.number_input("Number of FOC Riders", min_value=0, max_value=100, value=10)
 
-    st.sidebar.header('Parameters')
-    p['nEXP']    = st.sidebar.number_input('EXP riders', 0,100,p['nEXP'])
-    p['nFOC']    = st.sidebar.number_input('FOC riders', 0,100,p['nFOC'])
-    p['capZone'] = st.sidebar.number_input('Riders/zone',1,6,p['capZone'])
+    st.sidebar.header("Instructor Times (min)")
+    inst_zone = st.sidebar.number_input("Zone Training", 0.0, 60.0, 5.0, 0.1)
+    inst_practice = st.sidebar.number_input("Area Practice", 0.0, 60.0, 3.0, 0.1)
+    inst_test = st.sidebar.number_input("Test", 0.0, 60.0, 2.0, 0.1)
 
-    st.sidebar.subheader('Times (min)')
-    for key, lo, hi in [
-        ('tEnter', 0.0, 5.0),
-        ('tA',      1.0, 20.0),
-        ('tB',      1.0, 20.0),
-        ('tC',      1.0, 20.0),
-        ('tExit',   0.0, 5.0),
-    ]:
-        p[key] = st.sidebar.number_input(
-            label=key,
-            min_value=lo,
-            max_value=hi,
-            value=p[key],
-            step=0.1 if key in ['tEnter','tExit'] else 0.5
-        )
+    st.sidebar.header("EXP Times (min)")
+    exp_zone = st.sidebar.number_input("Zone Training", 0.0, 60.0, 4.0, 0.1)
+    exp_practice = st.sidebar.number_input("Area Practice", 0.0, 60.0, 2.0, 0.1)
+    exp_test = st.sidebar.number_input("Test", 0.0, 60.0, 1.5, 0.1)
 
-    if st.sidebar.button('Run Simulation'):
-        st.session_state.res = RiderTrackSimulation(p).run()
-        st.session_state.animate=False
+    st.sidebar.header("FOC Times (min)")
+    foc_zone = st.sidebar.number_input("Zone Training", 0.0, 60.0, 3.0, 0.1)
+    foc_practice = st.sidebar.number_input("Area Practice", 0.0, 60.0, 2.5, 0.1)
+    foc_test = st.sidebar.number_input("Test", 0.0, 60.0, 2.0, 0.1)
 
-    if 'res' in st.session_state:
-        res = st.session_state.res
-        st.subheader(f"Total: {res['total_time']:.2f} min")
-        inst = max(e['time'] for e in res['events'] if e['rider_id']=='INST-1' and e['zone']=='Exit')
-        exp  = max((e['time'] for e in res['events'] if e['rider_type']=='EXP' and e['zone']=='Exit'), default=0)
-        foc  = max((e['time'] for e in res['events'] if e['rider_type']=='FOC' and e['zone']=='Exit'), default=0)
-        st.write(f"Instructor: {inst:.2f}, EXP: {exp:.2f}, FOC: {foc:.2f}")
+    # Run simulation button
+    if st.sidebar.button("Start Simulation"):
+        # Build rider schedule sequentially
+        riders = []
+        current_time = 0.0
 
-        # HTML5 Canvas animation
-        events_json = json.dumps(res['events'])
+        # Instructor
+        riders.append({
+            "id": "INST-1",
+            "start": current_time,
+            "zone": inst_zone,
+            "practice": inst_practice,
+            "test": inst_test
+        })
+        current_time += inst_zone + inst_practice + inst_test
+
+        # EXP riders sequentially
+        for i in range(1, n_exp + 1):
+            riders.append({
+                "id": f"EXP-{i}",
+                "start": current_time,
+                "zone": exp_zone,
+                "practice": exp_practice,
+                "test": exp_test
+            })
+            current_time += exp_zone + exp_practice + exp_test
+
+        # FOC riders sequentially
+        for i in range(1, n_foc + 1):
+            riders.append({
+                "id": f"FOC-{i}",
+                "start": current_time,
+                "zone": foc_zone,
+                "practice": foc_practice,
+                "test": foc_test
+            })
+            current_time += foc_zone + foc_practice + foc_test
+
+        total_time = current_time
+
+        # Display summary
+        st.subheader("Simulation Results")
+        st.write(f"Total Elapsed Time: **{total_time:.2f} minutes**")
+        if riders:
+            inst_finish = riders[0]['start'] + riders[0]['zone'] + riders[0]['practice'] + riders[0]['test']
+            st.write(f"Instructor finished at: {inst_finish:.2f} min")
+        if n_exp:
+            exp_finish = riders[n_exp]['start'] + riders[n_exp]['zone'] + riders[n_exp]['practice'] + riders[n_exp]['test']
+            st.write(f"EXP batch finished at: {exp_finish:.2f} min")
+        if n_foc:
+            foc_finish = riders[-1]['start'] + riders[-1]['zone'] + riders[-1]['practice'] + riders[-1]['test']
+            st.write(f"FOC batch finished at: {foc_finish:.2f} min")
+
+        # Pass data to JS for animation
+        riders_json = json.dumps(riders)
         html = f"""
-<canvas id='trackCanvas' width='800' height='200'></canvas>
+<canvas id='trackCanvas' width='900' height='200'></canvas>
 <script>
-const events = {events_json};
-const zones = ['Queue','Gate','ZoneA','ZoneB','ZoneC','Exit'];
-let t=0;
-const dt = 0.1;
+const riders = {riders_json};
+const totalTime = {total_time};
+const dt = 0.05;
 const canvas = document.getElementById('trackCanvas');
 const ctx = canvas.getContext('2d');
-const ypos = {{Queue:20,Gate:60,ZoneA:100,ZoneB:140,ZoneC:180,Exit:220}};
+
+// Region definitions (pixels)
+const regions = [
+  {{name:'Queue', x0: 20, width: 80}},
+  {{name:'Zone', x0:120, width:200}},
+  {{name:'Practice', x0:340, width:200}},
+  {{name:'Test', x0:560, width:200}},
+  {{name:'Exit', x0:780, width:80}}
+];
+// Y positions by group
+const yPos = {{INST:50, EXP:120, FOC:190}};
+
+let t = 0;
 function draw() {{
-  ctx.clearRect(0,0,800,200);
-  ctx.font='12px sans-serif';
-  events.forEach(e=>{{
-    if(e.time<=t && e.time+dt>t){{
-      const x = (t/Math.max(...events.map(ev=>ev.time)))*800;
-      const y = ypos[e.zone]||ypos['Queue'];
-      ctx.fillText(e.rider_id[0],x,y);
-    }}
+  ctx.clearRect(0,0,900,200);
+  // draw region labels
+  ctx.font = '14px sans-serif';
+  regions.forEach(r => {{
+    ctx.fillText(r.name, r.x0+10, 20);
+    ctx.strokeRect(r.x0, 30, r.width, 140);
   }});
-  t+=dt;
-  if(t<Math.max(...events.map(e=>e.time))) requestAnimationFrame(draw);
+
+  riders.forEach((r,index) => {{
+    const start = r.start;
+    let x, y;
+    if(t < start) return; // not started
+    const elapsed = t - start;
+    // determine stage
+    if(elapsed < r.zone) {{
+      // in zone
+      const f = elapsed/r.zone;
+      x = regions[1].x0 + f*regions[1].width;
+      y = yPos[r.id.split('-')[0]];
+    }} else if(elapsed < r.zone + r.practice) {{
+      // in practice
+      const f = (elapsed - r.zone)/r.practice;
+      x = regions[2].x0 + f*regions[2].width;
+      y = yPos[r.id.split('-')[0]];
+    }} else if(elapsed < r.zone + r.practice + r.test) {{
+      // in test
+      const f = (elapsed - r.zone - r.practice)/r.test;
+      x = regions[3].x0 + f*regions[3].width;
+      y = yPos[r.id.split('-')[0]];
+    }} else {{
+      // finished, in exit region
+      const f = Math.min((elapsed - r.zone - r.practice - r.test)/1,1);
+      x = regions[4].x0 + f*regions[4].width;
+      y = yPos[r.id.split('-')[0]];
+    }}
+    // draw rider icon
+    ctx.beginPath();
+    ctx.arc(x, y, 6, 0, 2*Math.PI);
+    if(r.id.startsWith('INST')) ctx.fillStyle='#ff0000';
+    else if(r.id.startsWith('EXP')) ctx.fillStyle='#00aa00';
+    else ctx.fillStyle='#0000ff';
+    ctx.fill();
+    ctx.fillStyle='#000';
+    ctx.fillText(r.id.split('-')[0], x-5, y+25);
+  }});
+
+  t += dt;
+  if(t < totalTime + 1) requestAnimationFrame(draw);
 }}
 draw();
 </script>
 """
-        components.html(html,height=250)
+        components.html(html, height=240)
 
-if __name__=='__main__':
+if __name__ == '__main__':
     main()
