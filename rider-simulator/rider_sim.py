@@ -73,9 +73,9 @@ def main():
 
         # Instructor
         inst = pipeline(0.0, 1, a_time, b_time, c_time, 'INST')[0]
-        exp_riders = pipeline(inst['finish'], n_exp, a_time, b_time, c_time, 'EXP')
+        exp_riders = pipeline(inst['finish'] + exit_dur, n_exp, a_time, b_time, c_time, 'EXP')
         exp_finish = exp_riders[-1]['finish'] if exp_riders else inst['finish']
-        foc_riders = pipeline(exp_finish, n_foc, a_time, b_time, c_time, 'FOC')
+        foc_riders = pipeline(exp_finish + exit_dur, n_foc, a_time, b_time, c_time, 'FOC')
         foc_finish = foc_riders[-1]['finish'] if foc_riders else exp_finish
 
         total_time = foc_finish
@@ -103,7 +103,6 @@ def main():
             "const dt = 0.05; const exitDur = 0.5;\n"
             "const ctx = document.getElementById('track').getContext('2d');\n"
             "const timerDiv = document.getElementById('timer');\n"
-            // Regions: Queue, A, B, C, Exit
             "const regions = ["
             "{name:'Queue', x:20, w:80},"
             "{name:'A', x:120, w:200},"
@@ -119,7 +118,7 @@ def main():
             "    if(e < r.a){ x = regions[1].x + (e/r.a)*regions[1].w; }\n"
             "    else if(e < r.a + r.b){ e -= r.a; x = regions[2].x + (e/r.b)*regions[2].w; }\n"
             "    else if(e < r.a + r.b + r.c){ e -= (r.a + r.b); x = regions[3].x + (e/r.c)*regions[3].w; }\n"
-            "    else if(e < r.c + r.b + r.a + exitDur){ e -= (r.a + r.b + r.c); x = regions[4].x + (e/exitDur)*regions[4].w; }\n"
+            "    else if(e < r.a + r.b + r.c + exitDur){ e -= (r.a + r.b + r.c); x = regions[4].x + (e/exitDur)*regions[4].w; }\n"
             "    else{ x = regions[0].x + regions[0].w/2; }\n"
             "    ctx.beginPath(); ctx.fillStyle = r.id.startsWith('INST')?'red':r.id.startsWith('EXP')?'green':'blue'; ctx.arc(x,y,8,0,2*Math.PI); ctx.fill(); ctx.fillStyle='black'; ctx.fillText(r.id, x-10,y+20); });\n"
             "  t += dt; if(t < totalTime + exitDur) requestAnimationFrame(draw); }\n"
