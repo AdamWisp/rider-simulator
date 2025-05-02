@@ -21,47 +21,52 @@ def main():
     mode = st.sidebar.radio(
         "Timing type", ["Per-Zone", "Whole Lap"], index=0, key="timing_mode"
     )
-
     if mode == "Per-Zone":
         st.sidebar.subheader("Zone Durations (minutes)")
-        a_time = st.sidebar.number_input(
-            "Zone A time", 0.0, 60.0, 5.0, 0.1, key="per_a"
-        )
-        b_time = st.sidebar.number_input(
-            "Zone B time", 0.0, 60.0, 5.0, 0.1, key="per_b"
-        )
-        c_time = st.sidebar.number_input(
-            "Zone C time", 0.0, 60.0, 5.0, 0.1, key="per_c"
-        )
+        a_time = st.sidebar.number_input("Zone A time", 0.0, 60.0, 5.0, 0.1, key="per_a")
+        b_time = st.sidebar.number_input("Zone B time", 0.0, 60.0, 5.0, 0.1, key="per_b")
+        c_time = st.sidebar.number_input("Zone C time", 0.0, 60.0, 5.0, 0.1, key="per_c")
+        cap_zone = st.sidebar.number_input("Riders per zone", 1, 2, 1, key="cap_zone")
+        lap_time = a_time + b_time + c_time
     else:
         st.sidebar.subheader("Lap Duration (minutes)")
-        lap = st.sidebar.number_input(
-            "Whole lap time", 0.0, 180.0, 15.0, 0.1, key="lap_time"
-        )
+        lap = st.sidebar.number_input("Whole lap time", 0.0, 180.0, 15.0, 0.1, key="lap_time")
         a_time = b_time = c_time = lap / 3.0
+        cap_zone = 1
+        lap_time = lap
 
     # Start simulation
     if st.sidebar.button("Start Simulation", key="run_sim"):
         exit_dur = 0.5  # fixed exit return to queue
 
-        # Pipeline function
-        def pipeline(start_time, count, a_d, b_d, c_d, prefix):
-            zoneA_free = start_time
-            zoneB_free = start_time
-            zoneC_free = start_time
+        # Pipeline allowing zone capacity
+        def pipeline(start_time, count, a_d, b_d, c_d, cap, prefix):
+            # initialize free times lists
+            zoneA_free = [start_time] * cap
+            zoneB_free = [start_time] * cap
+            zoneC_free = [start_time] * cap
             riders_list = []
             for i in range(1, count + 1):
-                rider_id = f"{prefix}{i if prefix!='INST' else ''}"
-                a_start = zoneA_free
-                zoneA_free = a_start + a_d
-                b_start = max(zoneB_free, a_start + a_d)
-                zoneB_free = b_start + b_d
-                c_start = max(zoneC_free, b_start + b_d)
-                zoneC_free = c_start + c_d
+                rid = f"{prefix}{i if prefix!='INST' else ''}"
+                # Zone A
+                a_idx = min(range(cap), key=lambda idx: zoneA_free[idx])
+                a_start = zoneA_free[a_idx]
+                zoneA_free[a_idx] = a_start + a_d
+                # Zone B
+                b_ready = a_start + a_d
+                b_idx = min(range(cap), key=lambda idx: max(zoneB_free[idx], b_ready))
+                b_start = max(zoneB_free[b_idx], b_ready)
+                zoneB_free[b_idx] = b_start + b_d
+                # Zone C
+                c_ready = b_start + b_d
+                c_idx = min(range(cap), key=lambda idx: max(zoneC_free[idx], c_ready))
+                c_start = max(zoneC_free[c_idx], c_ready)
+                zoneC_free[c_idx] = c_start + c_d
+                # Exit
                 exit_start = c_start + c_d
                 finish = exit_start + exit_dur
                 riders_list.append({
-                    "id": rider_id,
+                    "id": rid,
                     "start": a_start,
                     "a": a_d,
                     "b": b_d,
@@ -72,12 +77,11 @@ def main():
             return riders_list
 
         # Instructor
-        inst = pipeline(0.0, 1, a_time, b_time, c_time, 'INST')[0]
-        exp_riders = pipeline(inst['finish'] + exit_dur, n_exp, a_time, b_time, c_time, 'EXP')
+        inst = pipeline(0.0, 1, a_time, b_time, c_time, cap_zone, 'INST')[0]
+        exp_riders = pipeline(inst['finish'] + exit_dur, n_exp, a_time, b_time, c_time, cap_zone, 'EXP')
         exp_finish = exp_riders[-1]['finish'] if exp_riders else inst['finish']
-        foc_riders = pipeline(exp_finish + exit_dur, n_foc, a_time, b_time, c_time, 'FOC')
+        foc_riders = pipeline(exp_finish + exit_dur, n_foc, a_time, b_time, c_time, cap_zone, 'FOC')
         foc_finish = foc_riders[-1]['finish'] if foc_riders else exp_finish
-
         total_time = foc_finish
 
         # Summary
@@ -89,7 +93,7 @@ def main():
         if foc_riders:
             st.write(f"Last FOC finished: {foc_finish:.2f} min")
 
-        # Combine all riders
+        # Combine riders
         all_riders = [inst] + exp_riders + foc_riders
         riders_json = json.dumps(all_riders)
 
