@@ -31,14 +31,14 @@ class RiderTrackSimulation:
         # Synchronisation events
         self.inst_done = self.env.event()
         self.exp_done = self.env.event()
-        if params["nEXP"] == 0:  # nothing to wait for
-            self.exp_done.succeed()
+        if params["nEXP"] == 0:
+            self.exp_done.succeed()  # nothing to wait for
 
         # Completion bookkeeping
         self.total_riders = 1 + params["nEXP"] + params["nFOC"]
         self.finished_riders = 0
 
-        # Kick off first process (Instructor)
+        # Kick off the instructor
         self.env.process(self.rider_process("INST-1", "INST"))
 
     # ----------------------- bookkeeping helpers --------------------------- #
@@ -103,23 +103,26 @@ class RiderTrackSimulation:
 
         # ---- rider finished --------------------------------------------- #
         if rider_type == "EXP":
-            # last EXP to exit?  mark exp_done.
-            completed_exp = len([e for e in self.rider_events if e["rider_type"] == "EXP" and e["zone"] == "ExitGate" and e["action"] == "exit"])
+            completed_exp = len(
+                [e for e in self.rider_events
+                 if e["rider_type"] == "EXP" and e["zone"] == "ExitGate" and e["action"] == "exit"]
+            )
             if completed_exp == self.params["nEXP"]:
                 self.exp_done.succeed()
 
         self.finished_riders += 1
         if self.finished_riders == self.total_riders:
-            self.env.exit()  # terminate whole simulation
+            # return the StopSimulation event so env.run() ends cleanly
+            return self.env.exit()
 
     # ----------------------- injection helpers --------------------------- #
     def inject_exp_riders(self):
-        yield self.inst_done  # wait instructor
+        yield self.inst_done
         for i in range(1, self.params["nEXP"] + 1):
             self.env.process(self.rider_process(f"EXP-{i}", "EXP"))
 
     def inject_foc_riders(self):
-        yield self.exp_done  # wait last EXP
+        yield self.exp_done
         for i in range(1, self.params["nFOC"] + 1):
             self.env.process(self.rider_process(f"FOC-{i}", "FOC"))
 
@@ -135,7 +138,8 @@ class RiderTrackSimulation:
         self.env.process(self.inject_exp_riders())
         self.env.process(self.inject_foc_riders())
 
-        self.env.run()  # ends when self.env.exit() is called
+        # Run until StopSimulation event
+        self.env.run()
 
         total_time = max(e["time"] for e in self.rider_events) if self.rider_events else 0
         return {
