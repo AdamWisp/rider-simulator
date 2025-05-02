@@ -12,26 +12,37 @@ def main():
 
     # --- Sidebar Inputs ---
     st.sidebar.header("Batch Sizes")
-    n_exp = st.sidebar.number_input("Number of EXP Riders", min_value=0, max_value=100, value=25)
-    n_foc = st.sidebar.number_input("Number of FOC Riders", min_value=0, max_value=100, value=10)
+    n_exp = st.sidebar.number_input("Number of EXP Riders", min_value=0, max_value=100,
+                                     value=25, key="n_exp")
+    n_foc = st.sidebar.number_input("Number of FOC Riders", min_value=0, max_value=100,
+                                     value=10, key="n_foc")
 
     st.sidebar.header("Instructor Times (min)")
-    inst_zone = st.sidebar.number_input("Zone Training", 0.0, 60.0, 5.0, 0.1)
-    inst_practice = st.sidebar.number_input("Area Practice", 0.0, 60.0, 3.0, 0.1)
-    inst_test = st.sidebar.number_input("Test", 0.0, 60.0, 2.0, 0.1)
+    inst_zone = st.sidebar.number_input("Zone Training", 0.0, 60.0, 5.0, 0.1,
+                                         key="inst_zone")
+    inst_practice = st.sidebar.number_input("Area Practice", 0.0, 60.0, 3.0, 0.1,
+                                            key="inst_practice")
+    inst_test = st.sidebar.number_input("Test", 0.0, 60.0, 2.0, 0.1,
+                                         key="inst_test")
 
     st.sidebar.header("EXP Times (min)")
-    exp_zone = st.sidebar.number_input("Zone Training", 0.0, 60.0, 4.0, 0.1)
-    exp_practice = st.sidebar.number_input("Area Practice", 0.0, 60.0, 2.0, 0.1)
-    exp_test = st.sidebar.number_input("Test", 0.0, 60.0, 1.5, 0.1)
+    exp_zone = st.sidebar.number_input("Zone Training", 0.0, 60.0, 4.0, 0.1,
+                                        key="exp_zone")
+    exp_practice = st.sidebar.number_input("Area Practice", 0.0, 60.0, 2.0, 0.1,
+                                           key="exp_practice")
+    exp_test = st.sidebar.number_input("Test", 0.0, 60.0, 1.5, 0.1,
+                                        key="exp_test")
 
     st.sidebar.header("FOC Times (min)")
-    foc_zone = st.sidebar.number_input("Zone Training", 0.0, 60.0, 3.0, 0.1)
-    foc_practice = st.sidebar.number_input("Area Practice", 0.0, 60.0, 2.5, 0.1)
-    foc_test = st.sidebar.number_input("Test", 0.0, 60.0, 2.0, 0.1)
+    foc_zone = st.sidebar.number_input("Zone Training", 0.0, 60.0, 3.0, 0.1,
+                                        key="foc_zone")
+    foc_practice = st.sidebar.number_input("Area Practice", 0.0, 60.0, 2.5, 0.1,
+                                           key="foc_practice")
+    foc_test = st.sidebar.number_input("Test", 0.0, 60.0, 2.0, 0.1,
+                                        key="foc_test")
 
     # Run simulation button
-    if st.sidebar.button("Start Simulation"):
+    if st.sidebar.button("Start Simulation", key="start_sim"):  
         # Build rider schedule sequentially
         riders = []
         current_time = 0.0
@@ -108,46 +119,37 @@ const yPos = {{INST:50, EXP:120, FOC:190}};
 let t = 0;
 function draw() {{
   ctx.clearRect(0,0,900,200);
-  // draw region labels
   ctx.font = '14px sans-serif';
   regions.forEach(r => {{
     ctx.fillText(r.name, r.x0+10, 20);
     ctx.strokeRect(r.x0, 30, r.width, 140);
   }});
 
-  riders.forEach((r,index) => {{
+  riders.forEach(r => {{
     const start = r.start;
-    let x, y;
-    if(t < start) return; // not started
+    if(t < start) return;
     const elapsed = t - start;
-    // determine stage
+    let x, y;
     if(elapsed < r.zone) {{
-      // in zone
       const f = elapsed/r.zone;
       x = regions[1].x0 + f*regions[1].width;
       y = yPos[r.id.split('-')[0]];
     }} else if(elapsed < r.zone + r.practice) {{
-      // in practice
       const f = (elapsed - r.zone)/r.practice;
       x = regions[2].x0 + f*regions[2].width;
       y = yPos[r.id.split('-')[0]];
     }} else if(elapsed < r.zone + r.practice + r.test) {{
-      // in test
       const f = (elapsed - r.zone - r.practice)/r.test;
       x = regions[3].x0 + f*regions[3].width;
       y = yPos[r.id.split('-')[0]];
     }} else {{
-      // finished, in exit region
       const f = Math.min((elapsed - r.zone - r.practice - r.test)/1,1);
       x = regions[4].x0 + f*regions[4].width;
       y = yPos[r.id.split('-')[0]];
     }}
-    // draw rider icon
     ctx.beginPath();
     ctx.arc(x, y, 6, 0, 2*Math.PI);
-    if(r.id.startsWith('INST')) ctx.fillStyle='#ff0000';
-    else if(r.id.startsWith('EXP')) ctx.fillStyle='#00aa00';
-    else ctx.fillStyle='#0000ff';
+    ctx.fillStyle = r.id.startsWith('INST') ? '#ff0000' : r.id.startsWith('EXP') ? '#00aa00' : '#0000ff';
     ctx.fill();
     ctx.fillStyle='#000';
     ctx.fillText(r.id.split('-')[0], x-5, y+25);
