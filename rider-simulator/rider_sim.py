@@ -71,8 +71,6 @@ class RiderTrackSimulation:
             self.record(rid, rtype, 'Gate', 'enter')
             yield self.env.timeout(self.p['tEnter'])
             self.record(rid, rtype, 'Gate', 'exit')
-            if rtype == 'INST' and not self.inst_done.triggered:
-                pass  # delay until exit
 
         # Zone A
         self.record(rid, rtype, 'ZoneA', 'enter')
@@ -148,9 +146,22 @@ def main():
     p['nEXP']    = st.sidebar.number_input('EXP riders', 0,100,p['nEXP'])
     p['nFOC']    = st.sidebar.number_input('FOC riders', 0,100,p['nFOC'])
     p['capZone'] = st.sidebar.number_input('Riders/zone',1,6,p['capZone'])
+
     st.sidebar.subheader('Times (min)')
-    for key,lo,hi in [('tEnter',0,5),('tA',1,20),('tB',1,20),('tC',1,20),('tExit',0,5)]:
-        p[key] = st.sidebar.number_input(label=key,min_value=lo,max_value=hi,value=p[key],step=0.1 if key in ['tEnter','tExit'] else 0.5)
+    for key, lo, hi in [
+        ('tEnter', 0.0, 5.0),
+        ('tA',      1.0, 20.0),
+        ('tB',      1.0, 20.0),
+        ('tC',      1.0, 20.0),
+        ('tExit',   0.0, 5.0),
+    ]:
+        p[key] = st.sidebar.number_input(
+            label=key,
+            min_value=lo,
+            max_value=hi,
+            value=p[key],
+            step=0.1 if key in ['tEnter','tExit'] else 0.5
+        )
 
     if st.sidebar.button('Run Simulation'):
         st.session_state.res = RiderTrackSimulation(p).run()
@@ -181,7 +192,7 @@ function draw() {{
   ctx.font='12px sans-serif';
   events.forEach(e=>{{
     if(e.time<=t && e.time+dt>t){{
-      const x = (t/e.time)*800;
+      const x = (t/Math.max(...events.map(ev=>ev.time)))*800;
       const y = ypos[e.zone]||ypos['Queue'];
       ctx.fillText(e.rider_id[0],x,y);
     }}
