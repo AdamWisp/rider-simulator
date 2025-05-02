@@ -1,4 +1,4 @@
-# app.py  – clean, working 2 May 2025
+# app.py
 import json
 from datetime import datetime
 
@@ -38,28 +38,35 @@ class RiderTrackSimulation:
 
     # ---------------- helper recorders ---------------- #
     def rec(self, rid, rtype, zone, action):
-        self.events.append(dict(rider_id=rid, rider_type=rtype,
-                                zone=zone, action=action, time=self.env.now))
+        self.events.append(dict(
+            rider_id=rid,
+            rider_type=rtype,
+            zone=zone,
+            action=action,
+            time=self.env.now
+        ))
 
     def monitor_queue(self):
         while True:
-            self.queue.append(dict(time=self.env.now,
-                                   queue_len=sum(e["zone"] == "Queue" and e["action"] == "enter"
-                                                 for e in self.events) -
-                                             sum(e["zone"] == "Queue" and e["action"] == "exit"
-                                                 for e in self.events)))
+            entered = sum(e["zone"] == "Queue" and e["action"] == "enter" for e in self.events)
+            exited  = sum(e["zone"] == "Queue" and e["action"] == "exit"  for e in self.events)
+            self.queue.append(dict(time=self.env.now, queue_len=entered - exited))
             yield self.env.timeout(0.5)
 
     def monitor_util(self, tag, res):
         while True:
-            self.util[tag].append(dict(time=self.env.now,
-                                       utilization=res.count / res.capacity))
+            self.util[tag].append(dict(
+                time=self.env.now,
+                utilization=res.count / res.capacity
+            ))
             yield self.env.timeout(0.5)
 
     # ---------------- main rider process ---------------- #
     def rider(self, rid, rtype):
+        # Enter queue
         self.rec(rid, rtype, "Queue", "enter")
 
+        # Enter gate (Zone A)
         with self.zone_a.request() as rq:
             yield rq
             self.rec(rid, rtype, "Queue", "exit")
@@ -88,23 +95,26 @@ class RiderTrackSimulation:
             yield self.env.timeout(self.p["tC"])
             self.rec(rid, rtype, "ZoneC", "exit")
 
-        # Exit
+        # Exit gate
         self.rec(rid, rtype, "Exit", "enter")
         yield self.env.timeout(self.p["tExit"])
         self.rec(rid, rtype, "Exit", "exit")
 
-        # bookkeeping
+        # Mark EXP completion
         if rtype == "EXP":
-            if len([e for e in self.events if e["rider_type"] == "EXP" and
-                                            e["zone"] == "Exit" and
-                                            e["action"] == "exit"]) == self.p["nEXP"]:
+            done_exp = len([
+                e for e in self.events
+                if e["rider_type"] == "EXP" and e["zone"] == "Exit" and e["action"] == "exit"
+            ])
+            if done_exp == self.p["nEXP"]:
                 self.exp_done.succeed()
 
+        # Final barrier
         self.finished += 1
         if self.finished == self.total_riders and not self.done_event.triggered:
             self.done_event.succeed()
 
-    # ---------------- injectors ---------------- #
+    # ---------------- inject batches ---------------- #
     def inject_exp(self):
         yield self.inst_done
         for i in range(1, self.p["nEXP"] + 1):
@@ -115,8 +125,9 @@ class RiderTrackSimulation:
         for i in range(1, self.p["nFOC"] + 1):
             self.env.process(self.rider(f"FOC-{i}", "FOC"))
 
-    # ---------------- run ---------------- #
+    # ---------------- run simulation ---------------- #
     def run(self):
+        # Start monitors and injectors
         self.env.process(self.monitor_queue())
         self.env.process(self.monitor_util("A", self.zone_a))
         self.env.process(self.monitor_util("B", self.zone_b))
@@ -124,34 +135,41 @@ class RiderTrackSimulation:
         self.env.process(self.inject_exp())
         self.env.process(self.inject_foc())
 
-        self.env.run(until=self.done_event)      # ← stops cleanly
+        # Run until all riders finish
+        self.env.run(until=self.done_event)
 
-        total = max(e["time"] for e in self.events)
-        return dict(events=self.events, queue=self.queue, util=self.util,
-                    total_time=total)
+        total = max(e["time"] for e in self.events) if self.events else 0
+        return dict(events=self.events, queue=self.queue, util=self.util, total_time=total)
 
 # ─────────────────────────── Plot helpers ─────────────────────────── #
 def gantt(events):
     df = pd.DataFrame(events)
-    segs = []
+    segments = []
     for rid in df["rider_id"].unique():
         rd = df[df["rider_id"] == rid]
-        tp = rd["rider_type"].iloc[0]
+        rtype = rd["rider_type"].iloc[0]
         for z in ["Queue", "Gate", "ZoneA", "ZoneB", "ZoneC", "Exit"]:
-            ent = rd[(rd.zone == z) & (rd.action == "enter")]
-            ext = rd[(rd.zone == z) & (rd.action == "exit")]
+            ent = rd[(rd.zone == z) & (rd.action == "enter")].reset_index()
+            ext = rd[(rd.zone == z) & (rd.action == "exit")].reset_index()
             for i in range(min(len(ent), len(ext))):
-                segs.append(dict(Task=rid, Start=ent.iloc[i].time,
-                                 Finish=ext.iloc[i].time,
-                                 Resource=tp))
-    if not segs:
+                segments.append(dict(
+                    Task=rid,
+                    Start=ent.loc[i, "time"],
+                    Finish=ext.loc[i, "time"],
+                    Resource=rtype
+                ))
+    if not segments:
         return None
+    seg_df = pd.DataFrame(segments)
     colors = {"INST": "rgb(255,0,0)", "EXP": "rgb(0,255,0)", "FOC": "rgb(0,0,255)"}
-    fig = ff.create_gantt(pd.DataFrame(segs), colors=colors,
-                          index_col="Resource", group_tasks=True,
-                          show_colorbar=True, title="Rider timeline")
-    fig.update_layout(xaxis_title="Minutes", yaxis_title="Rider",
-                      legend_title="Type", height=600)
+    fig = ff.create_gantt(
+        seg_df, colors=colors, index_col="Resource",
+        group_tasks=True, show_colorbar=True, title="Rider Timeline"
+    )
+    fig.update_layout(
+        xaxis_title="Time (min)", yaxis_title="Rider",
+        legend_title="Type", height=600
+    )
     return fig
 
 def line(df, x, y, **kw):
@@ -161,65 +179,100 @@ def line(df, x, y, **kw):
 
 # ─────────────────────────── Streamlit UI ─────────────────────────── #
 def main():
-    st.set_page_config("Rider Track Simulator", "🏍️", layout="wide")
+    st.set_page_config("Rider Training Track Simulation", "🏍️", layout="wide")
     st.title("🏍️ Rider Training Track Simulation")
 
-    defaults = dict(nEXP=25, nFOC=10, capZone=1,
-                    tEnter=0.5, tA=5.0, tB=5.0, tC=5.0, tExit=0.5)
+    # Default parameters
+    defaults = dict(
+        nEXP=25, nFOC=10, capZone=1,
+        tEnter=0.5, tA=5.0, tB=5.0, tC=5.0, tExit=0.5
+    )
     if "p" not in st.session_state:
         st.session_state.p = defaults.copy()
     p = st.session_state.p
 
-    # sidebar
+    # Sidebar inputs
     st.sidebar.header("Parameters")
-    p["nEXP"]  = st.sidebar.number_input("Experienced riders", 0, 100, p["nEXP"])
-    p["nFOC"]  = st.sidebar.number_input("Focus riders", 0, 100, p["nFOC"])
-    p["capZone"] = st.sidebar.number_input("Capacity / zone", 1, 6, p["capZone"])
-    st.sidebar.subheader("Times (min)")
-    for k, lo, hi in [("tEnter",0,5), ("tA",1,20), ("tB",1,20),
-                      ("tC",1,20), ("tExit",0,5)]:
-        p[k] = st.sidebar.number_input(k, lo, hi, p[k], 0.1 if k in ("tEnter","tExit") else 0.5)
+    p["nEXP"]    = st.sidebar.number_input("Experienced riders", min_value=0,   max_value=100, value=p["nEXP"])
+    p["nFOC"]    = st.sidebar.number_input("Focus riders",       min_value=0,   max_value=100, value=p["nFOC"])
+    p["capZone"] = st.sidebar.number_input("Capacity / zone",    min_value=1,   max_value=6,   value=p["capZone"])
 
+    st.sidebar.subheader("Times (minutes)")
+    for k, lo, hi in [
+        ("tEnter", 0.0, 5.0),
+        ("tA",      1.0, 20.0),
+        ("tB",      1.0, 20.0),
+        ("tC",      1.0, 20.0),
+        ("tExit",   0.0, 5.0),
+    ]:
+        p[k] = st.sidebar.number_input(
+            label=k,
+            min_value=lo,
+            max_value=hi,
+            value=p[k],
+            step=0.1 if k in ("tEnter", "tExit") else 0.5
+        )
+
+    # Run button
     if st.sidebar.button("Run simulation"):
-        with st.spinner("Running..."):
+        with st.spinner("Running simulation..."):
             st.session_state.res = RiderTrackSimulation(p).run()
 
-    # load / save json
-    st.sidebar.subheader("Save / load")
+    # Save / Load scenario
+    st.sidebar.subheader("Save / load scenario")
     scen = st.sidebar.text_area("Scenario JSON", json.dumps(p, indent=2), height=160)
     if st.sidebar.button("Load"):
         try:
             st.session_state.p = json.loads(scen)
-            st.sidebar.success("Loaded ✓")
+            st.sidebar.success("Loaded!")
         except json.JSONDecodeError as e:
-            st.sidebar.error(e)
+            st.sidebar.error(f"Invalid JSON: {e}")
 
-    # results
+    # Display results
     if "res" in st.session_state:
         res = st.session_state.res
-        st.success(f"Simulation finished in {res['total_time']:.2f} minutes.")
-        t1, t2 = st.tabs(["Gantt", "Stats"])
-        with t1:
-            g = gantt(res["events"])
-            st.plotly_chart(g, use_container_width=True) if g else st.info("No data.")
-        with t2:
-            q_df = pd.DataFrame(res["queue"])
-            u_df = pd.DataFrame([{"time":u["time"], "zone":f"Zone {z}",
-                                  "util":u["util"]*100}
-                                  for z,l in res["util"].items() for u in l])
-            l1, l2 = st.columns(2)
-            with l1:
-                st.subheader("Queue length")
-                fig = line(q_df, "time", "queue_len",
-                           title="Queue length over time",
-                           labels={"queue_len":"Riders"})
-                st.plotly_chart(fig, use_container_width=True) if fig else st.info("No data")
-            with l2:
-                st.subheader("Zone utilisation %")
-                fig = line(u_df, "time", "util", color="zone",
-                           title="Zone utilisation",
-                           labels={"util":"% utilisation"})
-                st.plotly_chart(fig, use_container_width=True) if fig else st.info("No data")
+        st.success(f"Simulation completed in {res['total_time']:.2f} minutes.")
+
+        tab1, tab2 = st.tabs(["Gantt Chart", "Statistics"])
+        with tab1:
+            fig = gantt(res["events"])
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No Gantt data available.")
+
+        with tab2:
+            df_q = pd.DataFrame(res["queue"])
+            df_u = pd.DataFrame([
+                {"time": u["time"], "zone": f"Zone {z}", "util": u["utilization"] * 100}
+                for z, lst in res["util"].items() for u in lst
+            ])
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Queue Length Over Time")
+                fig_q = line(
+                    df_q, "time", "queue_len",
+                    title="Queue length", labels={"queue_len": "Riders"}
+                )
+                if fig_q:
+                    st.plotly_chart(fig_q, use_container_width=True)
+                else:
+                    st.info("No queue data.")
+
+            with col2:
+                st.subheader("Zone Utilization (%)")
+                fig_u = line(
+                    df_u, "time", "util", color="zone",
+                    title="Zone Utilization", labels={"util": "%"}
+                )
+                if fig_u:
+                    st.plotly_chart(fig_u, use_container_width=True)
+                else:
+                    st.info("No utilization data.")
+
+    else:
+        st.info("Adjust parameters and click **Run simulation** to start.")
 
 if __name__ == "__main__":
     main()
