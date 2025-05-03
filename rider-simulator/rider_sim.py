@@ -1,5 +1,4 @@
 import json
-import time
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -8,161 +7,120 @@ def main():
     st.set_page_config(page_title="Rider Training Simulator", layout="wide")
     st.title("🏍️ Rider Training Track Simulation")
 
-    # Sidebar configuration
+    # --- Sidebar Configuration ---
     st.sidebar.header("Batch Settings")
-    n_exp = st.sidebar.number_input(
-        "Number of EXP Riders", min_value=0, max_value=100, value=25, key="n_exp"
-    )
-    n_foc = st.sidebar.number_input(
-        "Number of FOC Riders", min_value=0, max_value=100, value=10, key="n_foc"
-    )
+    n_exp = st.sidebar.number_input("Number of EXP Riders", 0, 100, 25, key="n_exp")
+    n_foc = st.sidebar.number_input("Number of FOC Riders", 0, 100, 10, key="n_foc")
 
     st.sidebar.header("Zone Capacity")
-    cap_zone = st.sidebar.number_input(
-        "Riders per zone", min_value=1, max_value=2, value=1, key="cap_zone"
-    )
+    cap_zone = st.sidebar.number_input("Riders per Zone", 1, 2, 1, key="cap_zone")
 
     st.sidebar.header("Timing Mode")
     mode = st.sidebar.radio(
-        "Timing type", ["Per-Zone", "Whole Lap"], index=0, key="timing_mode"
+        "Choose timing:", ["Per-Zone", "Whole Lap", "Test"], index=0, key="timing_mode"
     )
 
-    # Per-zone or whole-lap durations
+    # --- Timing Inputs ---
+    # Default durations initialized
+    inst_a = inst_b = inst_c = exp_a = exp_b = exp_c = foc_a = foc_b = foc_c = 0.0
+    inst_lap = exp_lap = foc_lap = test_inst = test_exp = test_foc = 0.0
+
     if mode == "Per-Zone":
-        st.sidebar.subheader("Instructor Zone Times (min)")
+        st.sidebar.subheader("Instructor Zone (min)")
         inst_a = st.sidebar.number_input("INST Zone A", 0.0, 60.0, 5.0, 0.1, key="inst_a")
         inst_b = st.sidebar.number_input("INST Zone B", 0.0, 60.0, 5.0, 0.1, key="inst_b")
         inst_c = st.sidebar.number_input("INST Zone C", 0.0, 60.0, 5.0, 0.1, key="inst_c")
-        st.sidebar.subheader("EXP Zone Times (min)")
+
+        st.sidebar.subheader("EXP Zone (min)")
         exp_a = st.sidebar.number_input("EXP Zone A", 0.0, 60.0, 4.0, 0.1, key="exp_a")
         exp_b = st.sidebar.number_input("EXP Zone B", 0.0, 60.0, 4.0, 0.1, key="exp_b")
         exp_c = st.sidebar.number_input("EXP Zone C", 0.0, 60.0, 4.0, 0.1, key="exp_c")
-        st.sidebar.subheader("FOC Zone Times (min)")
+
+        st.sidebar.subheader("FOC Zone (min)")
         foc_a = st.sidebar.number_input("FOC Zone A", 0.0, 60.0, 3.0, 0.1, key="foc_a")
         foc_b = st.sidebar.number_input("FOC Zone B", 0.0, 60.0, 3.0, 0.1, key="foc_b")
         foc_c = st.sidebar.number_input("FOC Zone C", 0.0, 60.0, 3.0, 0.1, key="foc_c")
-        lap_div = False
-    else:
-        st.sidebar.subheader("Whole Lap Times (min)")
-        inst_lap = st.sidebar.number_input("INST Whole Lap", 0.0, 180.0, 15.0, 0.1, key="inst_lap")
-        exp_lap = st.sidebar.number_input("EXP Whole Lap", 0.0, 180.0, 12.0, 0.1, key="exp_lap")
-        foc_lap = st.sidebar.number_input("FOC Whole Lap", 0.0, 180.0, 10.0, 0.1, key="foc_lap")
-        # split lap equally into zones
+
+    elif mode == "Whole Lap":
+        st.sidebar.subheader("Whole Lap Duration (min)")
+        inst_lap = st.sidebar.number_input("INST Lap", 0.0, 180.0, 15.0, 0.1, key="inst_lap")
+        exp_lap = st.sidebar.number_input("EXP Lap", 0.0, 180.0, 12.0, 0.1, key="exp_lap")
+        foc_lap = st.sidebar.number_input("FOC Lap", 0.0, 180.0, 10.0, 0.1, key="foc_lap")
+        # split evenly
         inst_a = inst_b = inst_c = inst_lap / 3.0
         exp_a = exp_b = exp_c = exp_lap / 3.0
         foc_a = foc_b = foc_c = foc_lap / 3.0
-        lap_div = True
 
-    # Test times (only one rider at a time)
-    st.sidebar.subheader("Test Times (min)")
-    inst_test = st.sidebar.number_input("INST Test", 0.0, 180.0, 5.0, 0.1, key="inst_test")
-    exp_test = st.sidebar.number_input("EXP Test", 0.0, 180.0, 4.0, 0.1, key="exp_test")
-    foc_test = st.sidebar.number_input("FOC Test", 0.0, 180.0, 3.0, 0.1, key="foc_test")
+    else:  # Test mode
+        st.sidebar.subheader("Test Duration (min)")
+        test_inst = st.sidebar.number_input("INST Test", 0.0, 180.0, 5.0, 0.1, key="test_inst")
+        test_exp = st.sidebar.number_input("EXP Test", 0.0, 180.0, 4.0, 0.1, key="test_exp")
+        test_foc = st.sidebar.number_input("FOC Test", 0.0, 180.0, 3.0, 0.1, key="test_foc")
+        # In test mode, only one rider at a time and single duration covers whole path
+        inst_a = exp_a = foc_a = test_inst if test_inst else 0.0
+        inst_b = exp_b = foc_b = test_exp if test_exp else 0.0
+        inst_c = exp_c = foc_c = test_foc if test_foc else 0.0
+        cap_zone = 1
 
-    # Start simulation
+    # --- Run Simulation ---
     if st.sidebar.button("Start Simulation", key="run_sim"):
-        exit_dur = 0.5  # exit and return to queue
+        exit_dur = 0.5
 
-        # Pipeline with zone capacity and single-test resource
-        def pipeline(start_time, count, a_d, b_d, c_d, test_d, cap, prefix):
-            zoneA_free = [start_time] * cap
-            zoneB_free = [start_time] * cap
-            zoneC_free = [start_time] * cap
-            test_free = start_time
-            riders_list = []
-            for i in range(1, count + 1):
-                rid = f"{prefix}{i if prefix != 'INST' else ''}"
-                # Zone A
-                idx_a = min(range(cap), key=lambda idx: zoneA_free[idx])
-                t_a = zoneA_free[idx_a]
-                zoneA_free[idx_a] = t_a + a_d
-                # Zone B
-                ready_b = t_a + a_d
-                idx_b = min(range(cap), key=lambda idx: max(zoneB_free[idx], ready_b))
-                t_b = max(zoneB_free[idx_b], ready_b)
-                zoneB_free[idx_b] = t_b + b_d
-                # Zone C
-                ready_c = t_b + b_d
-                idx_c = min(range(cap), key=lambda idx: max(zoneC_free[idx], ready_c))
-                t_c = max(zoneC_free[idx_c], ready_c)
-                zoneC_free[idx_c] = t_c + c_d
-                # Test (capacity 1)
-                ready_t = t_c + c_d
-                t_test = max(test_free, ready_t)
-                test_free = t_test + test_d
-                # Exit
-                t_exit = test_free
-                t_finish = t_exit + exit_dur
-                riders_list.append({
-                    "id": rid,
-                    "start": t_a,
-                    "a": a_d,
-                    "b": b_d,
-                    "c": c_d,
-                    "test": test_d,
-                    "exit": t_exit,
-                    "finish": t_finish
-                })
-            return riders_list
+        # Scheduling pipeline respecting zone capacities
+        def pipeline(start, count, a_d, b_d, c_d, cap, label):
+            A_free = [start] * cap
+            B_free = [start] * cap
+            C_free = [start] * cap
+            riders = []
+            for i in range(count):
+                rid = f"{label}{i+1 if label!='INST' else ''}"
+                # A
+                ai = min(range(cap), key=lambda x: A_free[x])
+                sa = A_free[ai]
+                A_free[ai] = sa + a_d
+                # B
+                ready_b = sa + a_d
+                bi = min(range(cap), key=lambda x: max(B_free[x], ready_b))
+                sb = max(B_free[bi], ready_b)
+                B_free[bi] = sb + b_d
+                # C
+                ready_c = sb + b_d
+                ci = min(range(cap), key=lambda x: max(C_free[x], ready_c))
+                sc = max(C_free[ci], ready_c)
+                C_free[ci] = sc + c_d
+                # exit
+                se = sc + c_d
+                fin = se + exit_dur
+                riders.append({"id":rid, "start":sa, "a":a_d, "b":b_d, "c":c_d, "exit":se, "finish":fin})
+            return riders
 
-        # Generate schedules
-        inst = pipeline(0.0, 1, inst_a, inst_b, inst_c, inst_test, cap_zone, 'INST')[0]
-        exp_start = inst['finish']
-        exp_riders = pipeline(exp_start, n_exp, exp_a, exp_b, exp_c, exp_test, cap_zone, 'EXP')
-        last_exp = exp_riders[-1]['finish'] if exp_riders else inst['finish']
-        foc_start = last_exp
-        foc_riders = pipeline(foc_start, n_foc, foc_a, foc_b, foc_c, foc_test, cap_zone, 'FOC')
-        last_foc = foc_riders[-1]['finish'] if foc_riders else last_exp
-        total_time = last_foc
+        # Assemble
+        inst = pipeline(0.0, 1, inst_a, inst_b, inst_c, cap_zone, 'INST')[0]
+        exp_list = pipeline(inst['finish'] + exit_dur, n_exp, exp_a, exp_b, exp_c, cap_zone, 'EXP')
+        foc_list = pipeline((exp_list[-1]['finish'] if exp_list else inst['finish']) + exit_dur,
+                             n_foc, foc_a, foc_b, foc_c, cap_zone, 'FOC')
+        all_riders = [inst] + exp_list + foc_list
+        total = all_riders[-1]['finish'] if all_riders else 0.0
 
-        # Display summary
+        # Summary
         st.subheader("Simulation Results")
-        st.write(f"Total elapsed time: **{total_time:.2f}** minutes")
-        st.write(f"Instructor finish: {inst['finish']:.2f} min")
-        if exp_riders:
-            st.write(f"First EXP start: {exp_riders[0]['start']:.2f}, last EXP finish: {last_exp:.2f} min")
-        if foc_riders:
-            st.write(f"First FOC start: {foc_riders[0]['start']:.2f}, last FOC finish: {last_foc:.2f} min")
+        st.write(f"Total Time: **{total:.2f}** min")
+        st.write(f"INST finish: {inst['finish']:.2f} min")
+        if exp_list: st.write(f"Last EXP finish: {exp_list[-1]['finish']:.2f} min")
+        if foc_list: st.write(f"Last FOC finish: {foc_list[-1]['finish']:.2f} min")
 
-        # Combine all riders for animation
-        all_riders = [inst] + exp_riders + foc_riders
-        riders_json = json.dumps(all_riders)
-
-        # Animation HTML
+        # Animation
+        data = json.dumps(all_riders)
         html = (
-            "<div style='font:16px monospace;margin-bottom:5px;' id='timer'>Time: 0.00 min</div>"
+            "<div id='timer' style='font:16px monospace'>Time: 0.00 min</div>"
             "<canvas id='track' width='900' height='360'></canvas>"
             "<script>\n"
-            "const riders = " + riders_json + ";\n"
-            "const totalTime = " + str(total_time) + ";\n"
-            "const dt = 0.05; const exitDur = 0.5;\n"
-            "const ctx = document.getElementById('track').getContext('2d');\n"
-            "const timerDiv = document.getElementById('timer');\n"
-            "const regions = ["
-            "{name:'Queue', x:20, w:60},"
-            "{name:'A', x:100, w:150},"
-            "{name:'B', x:260, w:150},"
-            "{name:'C', x:420, w:150},"
-            "{name:'Test', x:580, w:150},"
-            "{name:'Exit', x:740, w:80}];\n"
-            "const ypos = {INST:80, EXP:160, FOC:240};\n"
-            "let t = 0; function draw(){\n"
-            "  ctx.clearRect(0,0,900,360); ctx.font='14px sans-serif';\n"
-            "  regions.forEach(r=>{ ctx.strokeRect(r.x,40,r.w,260); ctx.fillText(r.name, r.x+5,30); });\n"
-            "  timerDiv.innerText = 'Time: '+t.toFixed(2)+' min';\n"
-            "  riders.forEach(r=>{ if(t < r.start) return; let e = t - r.start; let x, y = ypos[r.id.replace(/[0-9]/g,'')];\n"
-            "    if(e < r.a){ x = regions[1].x + (e/r.a)*regions[1].w; }\n"
-            "    else if(e < r.a + r.b){ e -= r.a; x = regions[2].x + (e/r.b)*regions[2].w; }\n"
-            "    else if(e < r.a + r.b + r.c){ e -= (r.a + r.b); x = regions[3].x + (e/r.c)*regions[3].w; }\n"
-            "    else if(e < r.a + r.b + r.c + r.test){ e -= (r.a + r.b + r.c); x = regions[4].x + (e/r.test)*regions[4].w; }\n"
-            "    else if(e < r.a + r.b + r.c + r.test + exitDur){ e -= (r.a + r.b + r.c + r.test); x = regions[5].x + (e/exitDur)*regions[5].w; }\n"
-            "    else{ x = regions[0].x + regions[0].w/2; }\n"
-            "    ctx.beginPath(); ctx.fillStyle = r.id.startsWith('INST')?'red':r.id.startsWith('EXP')?'green':'blue'; ctx.arc(x,y,8,0,2*Math.PI); ctx.fill(); ctx.fillStyle='black'; ctx.fillText(r.id, x-10,y+20); });\n"
-            "  t += dt; if(t < totalTime + exitDur) requestAnimationFrame(draw); }\n"
-            "draw();\n"
+            "const riders="+data+"; const total="+str(total)+"; const dt=0.05; const exitD=0.5;\n"
+            "const ctx=document.getElementById('track').getContext('2d'); const timer=document.getElementById('timer');\n"
+            "const regs=[{x:20,w:60,n:'Que'},{x:120,w:200,n:'A'},{x:340,w:200,n:'B'},{x:560,w:200,n:'C'},{x:780,w:80,n:'Exit'}];\n"
+            "const y={INST:80,EXP:160,FOC:240}; let t=0; function draw(){ ctx.clearRect(0,0,900,360); ctx.font='14px sans-serif'; regs.forEach(r=>{ctx.strokeRect(r.x,40,r.w,260);ctx.fillText(r.n,r.x+5,30);}); timer.innerText='Time: '+t.toFixed(2)+' min'; riders.forEach(r=>{ if(t<r.start) return; let e=t-r.start; let x,ypos=y[r.id.replace(/[0-9]/g,'')]; if(e<r.a){x=regs[1].x+e/r.a*regs[1].w;} else if(e<r.a+r.b){e-=r.a;x=regs[2].x+e/r.b*regs[2].w;} else if(e<r.a+r.b+r.c){e-=r.a+r.b;x=regs[3].x+e/r.c*regs[3].w;} else if(e<r.a+r.b+r.c+exitD){e-=(r.a+r.b+r.c);x=regs[4].x+e/exitD*regs[4].w;} else{x=regs[0].x+regs[0].w/2;} ctx.beginPath();ctx.fillStyle=r.id.startsWith('INST')?'red':r.id.startsWith('EXP')?'green':'blue';ctx.arc(x,ypos,8,0,2*Math.PI);ctx.fill();ctx.fillStyle='black';ctx.fillText(r.id,x-10,ypos+20);} ); t+=dt;if(t<total+exitD)requestAnimationFrame(draw);}draw();\n"
             "</script>"
         )
         components.html(html, height=400)
 
-if __name__ == '__main__':
-    main()
+if __name__=='__main__': main()
