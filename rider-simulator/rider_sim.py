@@ -7,143 +7,159 @@ def main():
     st.set_page_config(page_title="Rider Training Track Simulation", layout="wide")
     st.title("🏍️ Rider Training Track Simulation")
 
-    # --- Sidebar: Batches & Capacity ---
-    st.sidebar.header("Batch Settings")
+    # --- Sidebar: Configuration ---
+    st.sidebar.header("Batch & Capacity")
     n_exp = st.sidebar.number_input("Number of EXP Riders", 0, 100, 25, key="n_exp")
     n_foc = st.sidebar.number_input("Number of FOC Riders", 0, 100, 10, key="n_foc")
     cap_zone = st.sidebar.number_input("Riders per Zone", 1, 2, 1, key="cap_zone")
 
-    # --- Sidebar: Phases Selection ---
     st.sidebar.header("Select Phases for EXP/FOC")
     phases_selected = st.sidebar.multiselect(
-        "Choose which phases to include:", ["Per-Zone", "Whole Lap", "Test"],
-        default=["Per-Zone", "Whole Lap", "Test"]
+        "Include phases:", ["Per-Zone", "Whole Lap", "Test"],
+        default=["Per-Zone", "Whole Lap", "Test"], key="phases"
     )
+    # maintain fixed order
+    phase_order = ["Per-Zone", "Whole Lap", "Test"]
+    phases = [p for p in phase_order if p in phases_selected]
 
-    # Determine phase order always as: Per-Zone -> Whole Lap -> Test
-    desired_order = ["Per-Zone", "Whole Lap", "Test"]
-    phases = [ph for ph in desired_order if ph in phases_selected]
-
-    # --- Sidebar: Durations Inputs ---
-    st.sidebar.subheader("Per-Zone Total (sum A+B+C)")
-    inst_pz = st.sidebar.number_input("Instructor Total Zone", 0.0, 180.0, 15.0, 0.1, key="inst_pz")
-    exp_pz = st.sidebar.number_input("EXP Total Zone", 0.0, 180.0, 12.0, 0.1, key="exp_pz")
-    foc_pz = st.sidebar.number_input("FOC Total Zone", 0.0, 180.0, 10.0, 0.1, key="foc_pz")
+    st.sidebar.header("Phase Durations (minutes)")
+    # Per-Zone totals (split equally)
+    inst_pz = st.sidebar.number_input("Instructor total zone", 0.0, 180.0, 15.0, 0.1, key="inst_pz")
+    exp_pz = st.sidebar.number_input("EXP total zone", 0.0, 180.0, 12.0, 0.1, key="exp_pz")
+    foc_pz = st.sidebar.number_input("FOC total zone", 0.0, 180.0, 10.0, 0.1, key="foc_pz")
     inst_a, inst_b, inst_c = (inst_pz/3,)*3
     exp_a, exp_b, exp_c = (exp_pz/3,)*3
     foc_a, foc_b, foc_c = (foc_pz/3,)*3
 
-    st.sidebar.subheader("Whole Lap Duration")
-    inst_lap = st.sidebar.number_input("Instructor Lap", 0.0, 180.0, 15.0, 0.1, key="inst_lap")
-    exp_lap = st.sidebar.number_input("EXP Lap", 0.0, 180.0, 12.0, 0.1, key="exp_lap")
-    foc_lap = st.sidebar.number_input("FOC Lap", 0.0, 180.0, 10.0, 0.1, key="foc_lap")
+    # Whole lap durations
+    inst_lap = st.sidebar.number_input("Instructor lap", 0.0, 180.0, 15.0, 0.1, key="inst_lap")
+    exp_lap = st.sidebar.number_input("EXP lap", 0.0, 180.0, 12.0, 0.1, key="exp_lap")
+    foc_lap = st.sidebar.number_input("FOC lap", 0.0, 180.0, 10.0, 0.1, key="foc_lap")
 
-    st.sidebar.subheader("Test Duration")
-    inst_test = st.sidebar.number_input("Instructor Test", 0.0, 180.0, 5.0, 0.1, key="inst_test")
-    exp_test = st.sidebar.number_input("EXP Test", 0.0, 180.0, 4.0, 0.1, key="exp_test")
-    foc_test = st.sidebar.number_input("FOC Test", 0.0, 180.0, 3.0, 0.1, key="foc_test")
+    # Test durations
+    inst_test = st.sidebar.number_input("Instructor test", 0.0, 180.0, 5.0, 0.1, key="inst_test")
+    exp_test = st.sidebar.number_input("EXP test", 0.0, 180.0, 4.0, 0.1, key="exp_test")
+    foc_test = st.sidebar.number_input("FOC test", 0.0, 180.0, 3.0, 0.1, key="foc_test")
 
     # --- Run Simulation ---
     if st.sidebar.button("Start Simulation"):
-        exit_dur = 0.5
+        exit_time = 0.5
         schedule = []
-        phase_end_times = []
-        phase_sequence = []
+        phase_times = []
+        phase_labels = []
+        current = 0.0
 
-        # Scheduling pipeline for each phase and batch
-        def pipeline(start, count, a_d, b_d, c_d, cap, label):
+        # pipeline helper
+        def pipeline(start, count, a, b, c, cap, label):
             A_free = [start]*cap
             B_free = [start]*cap
             C_free = [start]*cap
             out = []
             for i in range(count):
-                rider = f"{label}{i+1 if label!='INST' else ''}"
+                rid = f"{label}{i+1 if label!='INST' else ''}"
                 # A
-                ai = min(range(cap), key=lambda x: A_free[x])
-                sa = A_free[ai]; A_free[ai] = sa + a_d
+                ia = min(range(cap), key=lambda idx: A_free[idx])
+                ta = A_free[ia]
+                A_free[ia] = ta + a
                 # B
-                rb = sa + a_d
-                bi = min(range(cap), key=lambda x: max(B_free[x], rb))
-                sb = max(B_free[bi], rb); B_free[bi] = sb + b_d
+                tb_ready = ta + a
+                ib = min(range(cap), key=lambda idx: max(B_free[idx], tb_ready))
+                tb = max(B_free[ib], tb_ready)
+                B_free[ib] = tb + b
                 # C
-                rc = sb + b_d
-                ci = min(range(cap), key=lambda x: max(C_free[x], rc))
-                sc = max(C_free[ci], rc); C_free[ci] = sc + c_d
-                # Exit
-                se = sc + c_d; fin = se + exit_dur
-                out.append({'id': rider, 'start': sa, 'a': a_d, 'b': b_d, 'c': c_d, 'exit': se, 'finish': fin})
+                tc_ready = tb + b
+                ic = min(range(cap), key=lambda idx: max(C_free[idx], tc_ready))
+                tc = max(C_free[ic], tc_ready)
+                C_free[ic] = tc + c
+                # exit
+                te = tc + c
+                tf = te + exit_time
+                out.append({"id": rid, "start": ta, "a": a, "b": b, "c": c, "exit": te, "finish": tf})
             return out
 
-        # 1) Instructor always whole lap at the start
+        # 1. Instructor always does one whole lap at t=0
         inst_sched = pipeline(0.0, 1, inst_lap, 0.0, 0.0, 1, 'INST')
         schedule += inst_sched
         current = inst_sched[0]['finish']
-        phase_end_times.append(current)
-        phase_sequence.append({'batch':'INST','phase':'Whole Lap'})
+        phase_times.append(current)
+        phase_labels.append({'batch':'INST','phase':'Whole Lap'})
 
-        # 2) EXP batch goes through each selected phase in fixed order
+        # 2. EXP: run each selected phase in fixed order
         for ph in phases:
-            if ph=='Per-Zone':    a,b,c,cap = exp_a,exp_b,exp_c,cap_zone
-            elif ph=='Whole Lap': a,b,c,cap = exp_lap,0.0,0.0,1
-            else:                 a,b,c,cap = 0.0,0.0,exp_test,1
-            exp_sched = pipeline(current, n_exp, a,b,c,cap,'EXP')
-            schedule += exp_sched
-            current = exp_sched[-1]['finish'] if exp_sched else current
-            phase_end_times.append(current)
-            phase_sequence.append({'batch':'EXP','phase':ph})
+            if ph=='Per-Zone': params=(exp_a, exp_b, exp_c, cap_zone)
+            elif ph=='Whole Lap': params=(exp_lap, 0.0, 0.0, 1)
+            else: params=(0.0, 0.0, exp_test, 1)
+            out = pipeline(current, n_exp, *params, 'EXP')
+            schedule += out
+            if out: current = out[-1]['finish']
+            phase_times.append(current)
+            phase_labels.append({'batch':'EXP','phase':ph})
 
-        # 3) FOC batch only starts after EXP finishes all phases
+        # 3. FOC: only after EXP completes all phases
         for ph in phases:
-            if ph=='Per-Zone':    a,b,c,cap = foc_a,foc_b,foc_c,cap_zone
-            elif ph=='Whole Lap': a,b,c,cap = foc_lap,0.0,0.0,1
-            else:                 a,b,c,cap = 0.0,0.0,foc_test,1
-            foc_sched = pipeline(current, n_foc, a,b,c,cap,'FOC')
-            schedule += foc_sched
-            current = foc_sched[-1]['finish'] if foc_sched else current
-            phase_end_times.append(current)
-            phase_sequence.append({'batch':'FOC','phase':ph})
+            if ph=='Per-Zone': params=(foc_a, foc_b, foc_c, cap_zone)
+            elif ph=='Whole Lap': params=(foc_lap, 0.0, 0.0, 1)
+            else: params=(0.0, 0.0, foc_test, 1)
+            out = pipeline(current, n_foc, *params, 'FOC')
+            schedule += out
+            if out: current = out[-1]['finish']
+            phase_times.append(current)
+            phase_labels.append({'batch':'FOC','phase':ph})
 
         total_time = current
 
-        # --- Summary ---
+        # display results
         st.subheader("Simulation Results")
-        st.write(f"Total Time: **{total_time:.2f}** minutes")
+        st.write(f"Total elapsed time: **{total_time:.2f}** minutes")
 
-        # --- Animation with Batch & Phase Indicator ---
-        riders_json = json.dumps(schedule)
-        seq_json = json.dumps(phase_sequence)
-        times_json = json.dumps(phase_end_times)
-        html = (
-            "<div style='display:flex; gap:20px; font:16px monospace;'>"
-            "<div id='timer'>Time: 0.00 min</div>"
-            "<div id='indicator'>Phase: INST - Whole Lap</div>"
-            "</div>"
-            "<canvas id='track' width='900' height='360'></canvas>"
-            "<script>\n"
-            "const riders="+riders_json+";\n"
-            "const seq="+seq_json+";\n"
-            "const times="+times_json+";\n"
-            "const total="+str(total_time)+"; const dt=0.05, exitD=0.5;\n"
-            "const ctx=document.getElementById('track').getContext('2d');\n"
-            "const timer=document.getElementById('timer'), ind=document.getElementById('indicator');\n"
-            "const regs=[{x:20,w:60,n:'Queue'},{x:120,w:200,n:'A'},{x:340,w:200,n:'B'},{x:560,w:200,n:'C'},{x:780,w:80,n:'Exit'}];\n"
-            "const y={INST:80,EXP:160,FOC:240};\n"
-            "let t=0; function draw(){\n"
-            "  ctx.clearRect(0,0,900,360); ctx.font='14px sans-serif';\n"
-            "  regs.forEach(r=>{ctx.strokeRect(r.x,40,r.w,260);ctx.fillText(r.n,r.x+5,30);});\n"
-            "  timer.innerText='Time: '+t.toFixed(2)+' min';\n"
-            "  for(let i=0;i<times.length;i++){ if(t<times[i]){ ind.innerText='Phase: '+seq[i].batch+' - '+seq[i].phase; break; }}\n"
-            "  riders.forEach(r=>{ if(t<r.start) return; let e=t-r.start; let x,ypos=y[r.id.replace(/[0-9]/g,'')];\n"
-            "    if(e<r.a){ x=regs[1].x+e/r.a*regs[1].w; }\n"
-            "    else if(e<r.a+r.b){ e-=r.a; x=regs[2].x+e/r.b*regs[2].w; }\n"
-            "    else if(e<r.a+r.b+r.c){ e-=(r.a+r.b); x=regs[3].x+e/r.c*regs[3].w; }\n"
-            "    else if(e<r.a+r.b+r.c+exitD){ e-=(r.a+r.b+r.c); x=regs[4].x+e/exitD*regs[4].w; }\n"
-            "    else{ x=regs[0].x+regs[0].w/2; }\n"
-            "    ctx.beginPath(); ctx.fillStyle=r.id.startsWith('INST')?'red':r.id.startsWith('EXP')?'green':'blue'; ctx.arc(x,ypos,8,0,2*Math.PI); ctx.fill();\n"
-            "    ctx.fillStyle='black'; ctx.fillText(r.id,x-10,ypos+20); });\n"
-            "  t+=dt; if(t<total+exitD)requestAnimationFrame(draw); } draw();\n"
-            "</script>"
-        )
+        # build animation HTML/JS
+        data = json.dumps(schedule)
+        labels = json.dumps(phase_labels)
+        times = json.dumps(phase_times)
+        html = f"""
+<div style='display:flex; gap:20px; font:16px monospace;'>
+  <div id='timer'>Time: 0.00 min</div>
+  <div id='indicator'>Phase: INST - Whole Lap</div>
+</div>
+<canvas id='track' width='900' height='360'></canvas>
+<script>
+const riders={data};
+const seq={labels};
+const pts={times};
+const total={total_time};
+const dt=0.05, exitTime={exit_time};
+const ctx=document.getElementById('track').getContext('2d');
+const timerDiv=document.getElementById('timer');
+const indDiv=document.getElementById('indicator');
+const regs=[{x:20,w:60,n:'Queue'},{x:120,w:200,n:'A'},{x:340,w:200,n:'B'},{x:560,w:200,n:'C'},{x:780,w:80,n:'Exit'}];
+const ypos={{INST:80,EXP:160,FOC:240}};
+let t=0;
+function draw(){{
+  ctx.clearRect(0,0,900,360);
+  ctx.font='14px sans-serif';
+  regs.forEach(r=>{{ctx.strokeRect(r.x,40,r.w,260);ctx.fillText(r.n,r.x+5,30);}});
+  timerDiv.innerText=`Time: ${{t.toFixed(2)}} min`;
+  for(let i=0;i<pts.length;i++){{if(t<pts[i]){{indDiv.innerText=`Phase: ${{seq[i].batch}} - ${{seq[i].phase}}`;break;}}}}
+  riders.forEach(r=>{{
+    if(t<r.start) return;
+    let e=t-r.start,x,y;
+    if(e<r.a){{x=regs[1].x+e/r.a*regs[1].w;}}
+    else if(e<r.a+r.b){{e-=r.a;x=regs[2].x+e/r.b*regs[2].w;}}
+    else if(e<r.a+r.b+r.c){{e-=(r.a+r.b);x=regs[3].x+e/r.c*regs[3].w;}}
+    else if(e<r.a+r.b+r.c+exitTime){{e-=(r.a+r.b+r.c);x=regs[4].x+e/exitTime*regs[4].w;}}
+    else{{x=regs[0].x+regs[0].w/2;}}
+    y=ypos[r.id.replace(/[0-9]/g,'')];
+    ctx.beginPath();
+    ctx.fillStyle=r.id.startsWith('INST')?'red':r.id.startsWith('EXP')?'green':'blue';
+    ctx.arc(x,y,8,0,2*Math.PI);ctx.fill();
+    ctx.fillStyle='black';ctx.fillText(r.id,x-10,y+20);
+  }});
+  t+=dt;
+  if(t<total+exitTime) requestAnimationFrame(draw);
+}}
+requestAnimationFrame(draw);
+</script>
+"""
         components.html(html, height=450)
 
 if __name__=='__main__':
