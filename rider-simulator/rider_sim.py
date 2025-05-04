@@ -68,8 +68,8 @@ def main():
                 out.append({"id": rid, "start": ta, "a": a, "b": b, "c": c, "exit": te, "finish": tf})
             return out
 
-        # 1) Instructor whole lap
-        inst_sched = pipeline(0.0, 1, inst_lap, 0.0, 0.0, 1, 'INST')
+        # 1) Instructor whole lap now split across A, B, C
+        inst_sched = pipeline(0.0, 1, inst_lap/3, inst_lap/3, inst_lap/3, 1, 'INST')
         schedule += inst_sched
         current = inst_sched[0]['finish']
         phase_times.append(current)
@@ -78,8 +78,8 @@ def main():
         # 2) EXP phases
         for ph in phases:
             if ph=='Per-Zone': params = (exp_a, exp_b, exp_c, cap_zone)
-            elif ph=='Whole Lap': params = (exp_lap, 0.0, 0.0, 1)
-            else: params = (0.0, 0.0, exp_test, 1)
+            elif ph=='Whole Lap': params = (exp_lap/3, exp_lap/3, exp_lap/3, 1)
+            else: params = (exp_test/3, exp_test/3, exp_test/3, 1)
             out = pipeline(current, n_exp, *params, 'EXP')
             schedule += out
             if out: current = out[-1]['finish']
@@ -89,8 +89,8 @@ def main():
         # 3) FOC phases
         for ph in phases:
             if ph=='Per-Zone': params = (foc_a, foc_b, foc_c, cap_zone)
-            elif ph=='Whole Lap': params = (foc_lap, 0.0, 0.0, 1)
-            else: params = (0.0, 0.0, foc_test, 1)
+            elif ph=='Whole Lap': params = (foc_lap/3, foc_lap/3, foc_lap/3, 1)
+            else: params = (foc_test/3, foc_test/3, foc_test/3, 1)
             out = pipeline(current, n_foc, *params, 'FOC')
             schedule += out
             if out: current = out[-1]['finish']
@@ -102,7 +102,7 @@ def main():
         st.subheader("Simulation Results")
         st.write(f"Total elapsed time: **{total_time:.2f}** minutes")
 
-        # Build animation HTML/JS using proper brace escaping
+        # Build animation HTML/JS
         riders_data = json.dumps(schedule)
         seq_data = json.dumps(phase_labels)
         time_data = json.dumps(phase_times)
@@ -146,7 +146,7 @@ function draw() {{
     else if (e < r.a+r.b+r.c) {{ e -= (r.a+r.b); x = regs[3].x + (e/r.c)*regs[3].w; }}
     else if (e < r.a+r.b+r.c+exitTime) {{ e -= (r.a+r.b+r.c); x = regs[4].x + (e/exitTime)*regs[4].w; }}
     else {{ x = regs[0].x + regs[0].w/2; }}
-    let y = ypos[r.id.replace(/[0-9]/g, '')];
+    const y = ypos[r.id.replace(/[0-9]/g, '')];
     ctx.beginPath();
     ctx.fillStyle = r.id.startsWith('INST') ? 'red' : r.id.startsWith('EXP') ? 'green' : 'blue';
     ctx.arc(x, y, 8, 0, 2*Math.PI); ctx.fill();
