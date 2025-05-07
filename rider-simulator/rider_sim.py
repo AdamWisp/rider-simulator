@@ -74,18 +74,15 @@ def main():
             return out
 
         # 1) Instructor does zones then lap then test
-        # Zones
         inst_zone = pipeline(0.0, 1, inst_a, inst_b, inst_c, 1, 'INST')
         schedule += inst_zone
         current = inst_zone[0]['finish']
         phase_times.append(current)
         phase_labels.append({'batch':'INST','phase':'Per-Zone'})
-        # Whole lap
         inst_l = pipeline(current, 1, inst_lap/3, inst_lap/3, inst_lap/3, 1, 'INST')
         schedule += inst_l; current = inst_l[0]['finish']
         phase_times.append(current)
         phase_labels.append({'batch':'INST','phase':'Whole Lap'})
-        # Test
         inst_t = pipeline(current, 1, inst_test/3, inst_test/3, inst_test/3, 1, 'INST')
         schedule += inst_t; current = inst_t[0]['finish']
         phase_times.append(current)
@@ -118,6 +115,7 @@ def main():
         st.subheader("Simulation Results")
         st.write(f"Total elapsed time: **{total_time:.2f}** minutes")
 
+        # Build animation HTML/JS
         riders_data = json.dumps(schedule)
         seq_data = json.dumps(phase_labels)
         time_data = json.dumps(phase_times)
@@ -145,10 +143,16 @@ const regs = [
 ];
 const ypos = {{ 'INST': 80, 'EXP': 160, 'FOC': 240 }};
 let t = 0;
+function formatTime(mins) {{
+  const h = Math.floor(mins/60);
+  const m = Math.floor(mins%60);
+  const s = Math.floor((mins*60)%60);
+  return `${{h.toString().padStart(2,'0')}}h ${{m.toString().padStart(2,'0')}}m ${{s.toString().padStart(2,'0')}}s`;
+}}
 function draw() {{
   ctx.clearRect(0,0,900,360); ctx.font='14px sans-serif';
   regs.forEach(r=>{{ctx.strokeRect(r.x,40,r.w,260);ctx.fillText(r.n,r.x+5,30);}});
-  timerDiv.innerText = `Time: ${{t.toFixed(2)}} min`;
+  timerDiv.innerText = `Time: ${{t.toFixed(2)}} min (${formatTime(t)})`;
   for(let i=0;i<pts.length;i++){{ if(t<pts[i]){{ indDiv.innerText = `Phase: ${{seq[i].batch}} - ${{seq[i].phase}}`; break; }} }}
   riders.forEach(r=>{{ if(t<r.start) return; let e=t-r.start; let x; if(e<r.a) x=regs[1].x+e/r.a*regs[1].w; else if(e<r.a+r.b){{ e-=r.a; x=regs[2].x+e/r.b*regs[2].w; }} else if(e<r.a+r.b+r.c){{ e-=(r.a+r.b); x=regs[3].x+e/r.c*regs[3].w; }} else if(e<r.a+r.b+r.c+exitTime){{ e-=(r.a+r.b+r.c); x=regs[4].x+e/exitTime*regs[4].w; }} else x=regs[0].x+regs[0].w/2; let y=ypos[r.id.replace(/[0-9]/g,'')]; ctx.beginPath(); ctx.fillStyle=r.id.startsWith('INST')?'red':r.id.startsWith('EXP')?'green':'blue'; ctx.arc(x,y,8,0,2*Math.PI); ctx.fill(); ctx.fillStyle='black'; ctx.fillText(r.id,x-10,y+20); }});
   t+=dt; if(t<total+exitTime) requestAnimationFrame(draw);
